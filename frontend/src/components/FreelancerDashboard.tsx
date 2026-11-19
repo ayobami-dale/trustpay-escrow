@@ -8,8 +8,10 @@ import { authFetch } from '@/lib/api';
 
 import { Milestone, Project, Proposal } from '@/types';
 import { ImageLightboxModal } from './ImageLightboxModal';
+import { MilestoneSubmitModal } from './MilestoneSubmitModal';
 import { ProjectChatModal } from './ProjectChatModal';
 import { ProjectCardSkeletonList, ProposalSkeletonList } from '@/components/skeletons';
+import { DownloadReceiptButton } from '@/components/DownloadReceiptButton';
 
 export function FreelancerDashboard() {
   const router = useRouter();
@@ -47,6 +49,9 @@ export function FreelancerDashboard() {
   // Selected project for Project Details Modal
   const [viewingProjectDetails, setViewingProjectDetails] = useState<Project | null>(null);
 
+  // Milestone submission modal state
+  const [submittingMilestone, setSubmittingMilestone] = useState<{ project: Project; milestone: Milestone } | null>(null);
+
   // Search and Category filters
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
@@ -62,6 +67,32 @@ export function FreelancerDashboard() {
     setProposalWalletAddress(address || '');
     setProposalCoverNote('');
     setProposalPortfolioUrl('');
+  };
+
+  // Opens the rich deliverable submission modal for an accepted proposal
+  const handleOpenSubmitModal = (prop: Proposal) => {
+    const targetProject = projects.find((p) => p.id === prop.project_id);
+    const project: Project = targetProject || {
+      id: prop.project_id,
+      title: prop.project_title || 'Freelance Project',
+      description: '',
+      category: 'General',
+      budget: prop.budget,
+      status: 'in_progress',
+      token: 'USDC',
+    };
+    const milestone: Milestone = (project.milestones || []).find(
+      (m) => m.status === 'pending' || m.status === 'in_revision' || m.status === 'submitted'
+    ) || {
+      id: `${prop.id}-milestone-0`,
+      project_id: prop.project_id,
+      milestone_index: 0,
+      title: 'Project Deliverable',
+      description: 'Final deliverable for this engagement',
+      amount: prop.budget,
+      status: 'pending',
+    };
+    setSubmittingMilestone({ project, milestone });
   };
 
   // Helper to render action button or status badge for a project
@@ -93,6 +124,7 @@ export function FreelancerDashboard() {
             >
               <span>💬 Chat with Client</span>
             </button>
+            <DownloadReceiptButton project={proj} />
             <span className={isModal 
               ? "px-5 py-2.5 bg-[#052e16] text-[#22c55e] border border-[#14532d] text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-md"
               : "px-3.5 py-1.5 bg-[#052e16] text-[#22c55e] border border-[#14532d] text-xs font-bold rounded-xl flex items-center gap-1"
@@ -677,6 +709,25 @@ export function FreelancerDashboard() {
                           >
                             <span>💬 Chat with Client</span>
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenSubmitModal(prop)}
+                            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow-md transition-all active:scale-95"
+                          >
+                            Submit Deliverable
+                          </button>
+                          <DownloadReceiptButton
+                            project={projects.find((p) => p.id === prop.project_id) || {
+                              id: prop.project_id,
+                              title: prop.project_title || 'Freelance Project',
+                              description: '',
+                              category: 'General',
+                              budget: prop.budget,
+                              status: 'in_progress',
+                              token: 'USDC',
+                            }}
+                            proposal={prop}
+                          />
                           <span className="px-3 py-1 bg-[#052e16] text-[#22c55e] border border-[#14532d] text-xs font-semibold rounded-full">
                             Granted ✓
                           </span>
@@ -986,6 +1037,21 @@ export function FreelancerDashboard() {
         receiverAddress={chatModalState.receiverAddress}
         recipientRoleLabel={chatModalState.recipientRoleLabel}
       />
+
+      {/* Rich Milestone Deliverable Submission Modal */}
+      {submittingMilestone && (
+        <MilestoneSubmitModal
+          isOpen={Boolean(submittingMilestone)}
+          onClose={() => setSubmittingMilestone(null)}
+          project={submittingMilestone.project}
+          milestone={submittingMilestone.milestone}
+          onSubmitted={() => {
+            setSubmittingMilestone(null);
+            fetchBackendProjects();
+            fetchMyProposals();
+          }}
+        />
+      )}
     </div>
   );
 }

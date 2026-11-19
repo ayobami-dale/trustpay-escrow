@@ -12,6 +12,11 @@ import { ApplicantCard } from './ApplicantCard';
 import { ProjectChatModal } from './ProjectChatModal';
 import { ProjectCardSkeletonList } from '@/components/skeletons';
 import { SUPPORTED_TOKENS } from '@/config/tokens';
+import { useTokenBalance, getBalanceShortfall } from '@/hooks/useCreateProjectForm';
+import { BalanceWarningBadge } from '@/components/BalanceWarningBadge';
+import { ProjectAuditLog } from '@/components/ProjectAuditLog';
+import { CalendarExportButton } from '@/components/CalendarExportButton';
+import { DownloadReceiptButton } from '@/components/DownloadReceiptButton';
 import {
   createProjectOnChain,
   lockEscrowOnChain,
@@ -57,9 +62,8 @@ export function ClientDashboard({ defaultTab = 'projects' }: ClientDashboardProp
   const [totalProjects, setTotalProjects] = useState(0);
 
   // Selected project for Applicants view
-  const [selectedProjectForApplicants, setSelectedProjectForApplicants] = useState<Project | null>(
-    null
-  );
+  const [selectedProjectForApplicants, setSelectedProjectForApplicants] = useState<Project | null>(null);
+  const [auditProject, setAuditProject] = useState<Project | null>(null);
 
   // Create Project Form State
   const [formTitle, setFormTitle] = useState('');
@@ -76,7 +80,10 @@ export function ClientDashboard({ defaultTab = 'projects' }: ClientDashboardProp
   const [formFreelancerAddress, setFormFreelancerAddress] = useState('');
   const [formLockImmediately, setFormLockImmediately] = useState(false);
   const [fundingTxMessage, setFundingTxMessage] = useState('');
-
+  const walletBalance = useTokenBalance(address, formToken);
+  const balanceShortfall = getBalanceShortfall(walletBalance.balance, formBudget === '' ? 0 : formBudget);
+  const hasInsufficientBalance = walletBalance.balance !== null && balanceShortfall > 0;
+  
   // Today's date string for restricting date pickers to current or future dates
   const todayStr = new Date().toISOString().split('T')[0];
 
@@ -456,6 +463,13 @@ export function ClientDashboard({ defaultTab = 'projects' }: ClientDashboardProp
       return;
     }
 
+    if (hasInsufficientBalance) {
+      toast.error(
+        `Insufficient ${formToken} balance. Fund your wallet with at least ${balanceShortfall.toLocaleString()} more ${formToken} before creating this escrow.`
+      );
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
@@ -729,14 +743,24 @@ export function ClientDashboard({ defaultTab = 'projects' }: ClientDashboardProp
                     </div>
 
                     <div className="self-start sm:self-center flex flex-col items-end gap-1.5">
-                      {proj.project_id_onchain !== undefined &&
-                        proj.project_id_onchain !== null && (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/30">
-                            <span>✦</span> Soroban Escrow #{proj.project_id_onchain.toString()}
-                          </span>
-                        )}
-                      {(proj.status === 'in_progress' ||
-                        (proj.status as string) === 'In progress') && (
+                      <button
+                        type="button"
+                        data-testid="client-audit-log-button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setAuditProject(proj);
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-1 text-[11px] font-bold text-indigo-300 transition-colors hover:bg-indigo-500/20"
+                      >
+                        <span aria-hidden="true">🔗</span> Audit Log
+                      </button>
+                      <CalendarExportButton project={proj} compact label="Calendar" />
+                      {proj.project_id_onchain !== undefined && proj.project_id_onchain !== null && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/30">
+                          <span>✦</span> Soroban Escrow #{proj.project_id_onchain.toString()}
+                        </span>
+                      )}
+                      {(proj.status === 'in_progress' || (proj.status as string) === 'In progress') && (
                         <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-[#052e16] text-[#22c55e] border border-[#14532d]">
                           In progress
                         </span>
@@ -752,6 +776,9 @@ export function ClientDashboard({ defaultTab = 'projects' }: ClientDashboardProp
                         <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-[#27272a] text-[#a1a1aa] border border-[#3f3f46]">
                           Completed
                         </span>
+                      )}
+                      {(proj.status === 'completed' || (proj.status as string) === 'Completed') && (
+                        <DownloadReceiptButton project={proj} />
                       )}
                     </div>
                   </div>
@@ -972,6 +999,15 @@ export function ClientDashboard({ defaultTab = 'projects' }: ClientDashboardProp
                   </div>
                 </div>
               </div>
+
+              <BalanceWarningBadge
+                address={address}
+                balance={walletBalance.balance}
+                budget={formBudget === '' ? 0 : formBudget}
+                token={formToken}
+                isLoading={walletBalance.loading}
+                error={walletBalance.error}
+              />
 
               {/* Visibility Radio Buttons */}
               <div className="space-y-2 pt-1">
@@ -1393,13 +1429,24 @@ export function ClientDashboard({ defaultTab = 'projects' }: ClientDashboardProp
               </div>
 
               {/* Save Project Button */}
-              <div className="pt-6 border-t border-[#27272a] flex justify-end">
+              <div className="pt-6 border-t border-[#27272a] flex flex-col sm:flex-row sm:items-center sm:justify-end gap-3">
+                {hasInsufficientBalance && (
+                  <p className="text-xs text-red-300 sm:text-right">
+                    Lock Funds &amp; Create Escrow is disabled until your {formToken} balance covers the budget.
+                  </p>
+                )}
                 <button
                   type="submit"
-                  disabled={isSubmitting}
-                  className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs sm:text-sm rounded-xl shadow-lg shadow-blue-600/30 transition-all cursor-pointer disabled:opacity-50"
+                  disabled={isSubmitting || hasInsufficientBalance}
+                  aria-label="Lock Funds & Create Escrow"
+                  title={hasInsufficientBalance ? 'Insufficient wallet balance' : undefined}
+                  className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs sm:text-sm rounded-xl shadow-lg shadow-blue-600/30 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {isSubmitting ? 'Saving Project...' : 'Save & Publish Escrow Project 🚀'}
+                  {isSubmitting
+                    ? 'Saving Project...'
+                    : formLockImmediately
+                    ? 'Lock Funds & Create Escrow 🔒'
+                    : 'Save & Publish Escrow Project 🚀'}
                 </button>
               </div>
             </form>
@@ -1613,6 +1660,26 @@ export function ClientDashboard({ defaultTab = 'projects' }: ClientDashboardProp
         receiverAddress={chatModalState.receiverAddress}
         recipientRoleLabel={chatModalState.recipientRoleLabel}
       />
+
+      {auditProject && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/80 p-3 backdrop-blur-md sm:p-6"
+          onClick={() => setAuditProject(null)}
+        >
+          <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto" onClick={(event) => event.stopPropagation()}>
+            <div className="mb-3 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setAuditProject(null)}
+                className="rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-xs font-bold text-slate-300 hover:text-white"
+              >
+                Close Audit Log ✕
+              </button>
+            </div>
+            <ProjectAuditLog project={auditProject} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
